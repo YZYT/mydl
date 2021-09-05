@@ -35,6 +35,25 @@ from torch.utils import data
 from torchvision import transforms
 
 
+def get_device():
+    ''' Get device (if GPU is available, use GPU) '''
+    return 'cuda' if torch.cuda.is_available() else 'cpu'
+
+def init_Seed(myseed=42069):
+
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    np.random.seed(myseed)
+    torch.manual_seed(myseed)
+    if get_device() == 'cuda':
+        torch.cuda.manual_seed_all(myseed)
+        print("GPU ready!") 
+    else:
+        print("No GPU!")
+
+
+
+
 # Defined in file: ./chapter_preliminaries/calculus.md
 def use_svg_display():
     """Use the svg format to display a plot in Jupyter."""
