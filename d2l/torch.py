@@ -34,11 +34,12 @@ from torch.nn import functional as F
 from torch.utils import data
 from torchvision import transforms
 
-
+# my function
 def get_device():
     ''' Get device (if GPU is available, use GPU) '''
     return 'cuda' if torch.cuda.is_available() else 'cpu'
 
+# my function
 def init_Seed(myseed=42069):
 
     torch.backends.cudnn.deterministic = True
@@ -51,7 +52,50 @@ def init_Seed(myseed=42069):
     else:
         print("No GPU!")
 
+# my function
+def train_clf(model, tr_set, te_set, loss, optimizer, lr_scheduler=None, device='cpu', n_epochs=10, early_stop=5):
 
+    epoch = 0
+
+    loss_record = {"train": [], "dev": []}
+
+    animator = d2l.Animator(xlabel='epoch', xlim=[1, n_epochs], ylim=[0, 1],
+                        legend=['train loss', 'train acc', 'test loss', 'test acc'],
+                        figsize=(6, 6))
+    
+    min_loss = [1000., 0.]
+    max_acc = [0., 0.]
+    
+    while epoch < n_epochs:
+        model.train()
+        for X, y in tr_set:
+            X, y = X.to(device), y.to(device)
+            optimizer.zero_grad()
+            l = loss(model(X), y)
+            l.backward()
+            optimizer.step()
+            
+            loss_record['train'].append(l.detach().cpu().item())
+        
+        if lr_scheduler:
+            lr_scheduler.step()
+        
+        epoch += 1
+        
+        train_l, train_acc = d2l.dev_clf(model, tr_set, loss, device)
+        dev_l, dev_acc = d2l.dev_clf(model, te_set, loss, device)
+        
+        if dev_l < min_loss[0]:
+            min_loss = [dev_l, dev_acc]
+        
+        if dev_acc > max_acc[0]:
+            max_acc = [dev_acc, dev_l]
+        
+        animator.add(epoch, (train_l, train_acc, dev_l, dev_acc))
+        loss_record['dev'].append(dev_l)
+#         print(f"epoch: {epoch:3d}, train loss: {train_l: .4f}, dev loss: {dev_l:.4f}")
+    
+    return min_loss, max_acc
 
 
 # Defined in file: ./chapter_preliminaries/calculus.md
@@ -190,7 +234,7 @@ def get_fashion_mnist_labels(labels):
 
 
 # Defined in file: ./chapter_linear-networks/image-classification-dataset.md
-def show_images(imgs, num_rows, num_cols, titles=None, scale=1.5):
+def show_images(imgs, num_rows, num_cols, titles=None, scale=1.5, cmap='Blues'):
     """Plot a list of images."""
     figsize = (num_cols * scale, num_rows * scale)
     _, axes = d2l.plt.subplots(num_rows, num_cols, figsize=figsize)
@@ -198,10 +242,10 @@ def show_images(imgs, num_rows, num_cols, titles=None, scale=1.5):
     for i, (ax, img) in enumerate(zip(axes, imgs)):
         if torch.is_tensor(img):
             # Tensor Image
-            ax.imshow(img.numpy())
+            ax.imshow(img.numpy(), cmap=cmap)
         else:
             # PIL Image
-            ax.imshow(img)
+            ax.imshow(img, cmap=cmap)
         ax.axes.get_xaxis().set_visible(False)
         ax.axes.get_yaxis().set_visible(False)
         if titles:
@@ -222,11 +266,11 @@ def load_data_fashion_mnist(batch_size, resize=None):
     if resize:
         trans.insert(0, transforms.Resize(resize))
     trans = transforms.Compose(trans)
-    mnist_train = torchvision.datasets.FashionMNIST(root="../data",
+    mnist_train = torchvision.datasets.FashionMNIST(root="./data",
                                                     train=True,
                                                     transform=trans,
                                                     download=True)
-    mnist_test = torchvision.datasets.FashionMNIST(root="../data",
+    mnist_test = torchvision.datasets.FashionMNIST(root="./data",
                                                    train=False,
                                                    transform=trans,
                                                    download=True)
@@ -240,9 +284,24 @@ def load_data_fashion_mnist(batch_size, resize=None):
 def accuracy(y_hat, y):
     """Compute the number of correct predictions."""
     if len(y_hat.shape) > 1 and y_hat.shape[1] > 1:
-        y_hat = d2l.argmax(y_hat, axis=1)
-    cmp = d2l.astype(y_hat, y.dtype) == y
-    return float(d2l.reduce_sum(d2l.astype(cmp, y.dtype)))
+        y_hat = y_hat.argmax(axis=1)
+    cmp = y_hat.type(y.dtype) == y
+    return float(cmp.type(y.dtype).sum())
+
+# my function
+def dev_clf(net, dv_set, loss, device='cpu'):
+    if isinstance(net, torch.nn.Module):
+        net.eval()
+    
+    metric = torch.zeros(3)
+
+    for X, y in dv_set:
+        X, y = X.to(device), y.to(device)
+        with torch.no_grad():
+            y_hat = net(X)
+            metric += torch.tensor([loss(y_hat, y).cpu().item() * len(y), accuracy(y_hat, y),  y.numel()])
+
+    return float(metric[0] / metric[2]), float(metric[1] / metric[2])
 
 
 # Defined in file: ./chapter_linear-networks/softmax-regression-scratch.md
