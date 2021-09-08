@@ -52,6 +52,13 @@ def init_Seed(myseed=42069):
     else:
         print("No GPU!")
 
+
+# my function
+def prep_dataloader(X, y, mode, batch_size):
+    dataset = data.TensorDataset(X, y)
+    return data.DataLoader(dataset, batch_size, shuffle=(mode == 'train'))
+
+
 # my function
 def train_clf(model, tr_set, te_set, loss, optimizer, lr_scheduler=None, device='cpu', n_epochs=10, early_stop=5):
 
