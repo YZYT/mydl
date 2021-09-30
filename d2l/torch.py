@@ -104,6 +104,63 @@ def train_clf(model, tr_set, te_set, loss, optimizer, lr_scheduler=None, device=
     
     return min_loss, max_acc
 
+# my function
+def train_reg(model, tr_set, te_set, loss, optimizer, lr_scheduler=None, device='cpu', n_epochs=10, early_stop=5):
+
+    epoch = 0
+
+    loss_record = {"train": [], "dev": []}
+
+    animator = d2l.Animator(xlabel='epoch', xlim=[1, n_epochs], yscale='log',
+                        legend=['train loss', 'test loss'],
+                        figsize=(6, 6))
+    
+    min_loss = 1000.
+    
+    while epoch < n_epochs:
+        model.train()
+        for X, y in tr_set:
+            X, y = X.to(device), y.to(device)
+            optimizer.zero_grad()
+            l = loss(model(X), y)
+            l.backward()
+            optimizer.step()
+            
+            loss_record['train'].append(l.detach().cpu().item())
+        
+        if lr_scheduler:
+            lr_scheduler.step()
+        
+        epoch += 1
+        
+        train_l = dev_reg(model, tr_set, loss, device)
+        dev_l = dev_reg(model, te_set, loss, device)
+        
+        if dev_l < min_loss:
+            min_loss = dev_l
+        
+        animator.add(epoch, (train_l, dev_l))
+        loss_record['dev'].append(dev_l)
+#         print(f"epoch: {epoch:3d}, train loss: {train_l: .4f}, dev loss: {dev_l:.4f}")
+    
+    return min_loss
+
+# my function
+def dev_reg(net, dv_set, loss, device='cpu'):
+    if isinstance(net, torch.nn.Module):
+        net.eval()
+    
+    metric = torch.zeros(2)
+
+    for X, y in dv_set:
+        X, y = X.to(device), y.to(device)
+        with torch.no_grad():
+            y_hat = net(X)
+            metric += torch.tensor([loss(y_hat, y).cpu().item() * len(y), y.numel()])
+
+    return float(metric[0] / metric[1])
+
+
 
 # Defined in file: ./chapter_preliminaries/calculus.md
 def use_svg_display():
@@ -200,7 +257,8 @@ def synthetic_data(w, b, num_examples):
     X = d2l.normal(0, 1, (num_examples, len(w)))
     y = d2l.matmul(X, w) + b
     y += d2l.normal(0, 0.01, y.shape)
-    return X, d2l.reshape(y, (-1, 1))
+    # return X, d2l.reshape(y, (-1, 1))
+    return X, y
 
 
 # Defined in file: ./chapter_linear-networks/linear-regression-scratch.md
