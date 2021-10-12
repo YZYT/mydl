@@ -452,7 +452,8 @@ class PSSGDv4(BasePSSGD):
         self.age = 0
         self.steps = 0
         self.id = k
-        
+        self.victim = 0
+
         self.state = [defaultdict(dict) for _ in range(k + 1)]
         self.fitness = [-1 for _ in range(k + 1)]
 
@@ -504,19 +505,19 @@ class PSSGDv4(BasePSSGD):
                 return i
             if self.fitness[i] > self.fitness[victim]:
                 victim = i
-        print(self.fitness)
+        # print(self.fitness)
         return victim
 
     def setloss(self, l):
-        victim = self.select_victim()
-        self.store_state(victim)
-        self.fitness[victim] = l
+        self.victim = self.select_victim()
+        # self.store_state(victim)
+        self.fitness[self.victim] = l
 
     def select_father(self):
-        return 0
+        return random.randint(0, self.k)
 
     def _select_candicate(self):
-        return self.k
+        return random.randint(0, self.k)
     
     def select_candicate(self):
         # select an individual to grow
@@ -570,9 +571,12 @@ class PSSGDv4(BasePSSGD):
         # for group in self.optimizer.param_groups:
         #     for p in group['params']:
         #         print(p.data)
+        # print(self.victim)
+        self.store_state(self.victim)
+
 
         # ======= evolution stage =======
-        if self._la_step >= self._total_la_steps * 10000:
+        if self._la_step >= self._total_la_steps:
             self._la_step = 0
 
             # find a victim
@@ -591,11 +595,14 @@ class PSSGDv4(BasePSSGD):
                     param_state_new['age'] = (self.age + param_state_fa['age']) / 2
                     param_state_new['steps'] = 0 
                     
-                    print(f"victim: {victim}")
-                    print(f"father: {father}")
-                    print(f"p.data: {p.data}")
-                    print(f"father: {param_state_fa['weight']}")
-                    print(f"new: {param_state_new['weight']}")
+                    self.fitness[victim] = (self.fitness[self.id] + self.fitness[father]) / 2
+
+                    # print(self.id, father, victim)
+                    # print(f"victim: {victim}")
+                    # print(f"father: {father}")
+                    # print(f"p.data: {p.data}")
+                    # print(f"father: {param_state_fa['weight']}")
+                    # print(f"new: {param_state_new['weight']}")
 
                     # print("using")
                     # print(self.state)
