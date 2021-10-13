@@ -431,7 +431,7 @@ class PSSGDv4(BasePSSGD):
     multiple points
     """
 
-    def __init__(self, optimizer, loss_fn=None, k=5, la_steps=5, la_alpha=0.5, pullback_momentum="none"):
+    def __init__(self, optimizer, ds_loader, loss_fn=None, k=5, la_steps=5, la_alpha=0.5, pullback_momentum="none"):
         """optimizer: inner optimizer
         la_steps (int): number of lookahead steps
         la_alpha (float): linear interpolation factor. 1.0 recovers the inner optimizer.
@@ -444,7 +444,8 @@ class PSSGDv4(BasePSSGD):
         self._la_step = 0  # counter for inner optimizer
         self.la_alpha = la_alpha
         self._total_la_steps = la_steps
-
+        self.ds_loader = ds_loader
+        
         # number
         self.k = k
 
@@ -589,7 +590,8 @@ class PSSGDv4(BasePSSGD):
                 for p in group['params']:
                     param_state_new = self.state[victim][p]
                     param_state_fa = self.state[father][p]
-
+                    
+                    # (b - a) * p + a
                     param_state_new['weight'].copy_(p.data.mul(self.la_alpha).add(param_state_fa['weight'], alpha=1.0-self.la_alpha))
 
                     param_state_new['age'] = (self.age + param_state_fa['age']) / 2
@@ -607,6 +609,7 @@ class PSSGDv4(BasePSSGD):
                     # print("using")
                     # print(self.state)
         
+        self.select_candicate()
         return loss
 
 # optimizer = # {any optimizer} e.g. torch.optim.Adam
