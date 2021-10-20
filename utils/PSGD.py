@@ -35,7 +35,7 @@ class Lookahead(Optimizer):
     Lookahead Optimizer: https://arxiv.org/abs/1907.08610
     """
 
-    def __init__(self, optimizer, la_steps=5, la_alpha=0.5, pullback_momentum="none"):
+    def __init__(self, optimizer, la_steps=5, la_alpha=-0.5, pullback_momentum="none"):
         """optimizer: inner optimizer
         la_steps (int): number of lookahead steps
         la_alpha (float): linear interpolation factor. 1.0 recovers the inner optimizer.
@@ -537,6 +537,7 @@ class PSSGDv4(BasePSSGD):
                 param_state['age'] = self.age
                 param_state['steps'] = self.steps
     
+
     def load_state(self, k):
         self.id = k
         for group in self.optimizer.param_groups:
@@ -555,10 +556,11 @@ class PSSGDv4(BasePSSGD):
                 and returns the loss.
         """
 
+        # print(self.id)
 
         # ======= backup the current state =======
 
-
+        # self.select_candicate()
 
         # ======= SGD step =======
         # SGD step (individual grow)
@@ -609,8 +611,228 @@ class PSSGDv4(BasePSSGD):
                     # print("using")
                     # print(self.state)
         
-        self.select_candicate()
+
         return loss
+
+
+class Volumn(BasePSSGD):
+    r"""Version 4.0
+    multiple points
+    """
+
+    def __init__(self, optimizer, ds_loader, loss_fn=None, k=5, la_steps=5, la_alpha=0.5, pullback_momentum="none"):
+        """optimizer: inner optimizer
+        la_steps (int): number of lookahead steps
+        la_alpha (float): linear interpolation factor. 1.0 recovers the inner optimizer.
+        pullback_momentum (str): change to inner optimizer momentum on interpolation update
+        """
+        self.optimizer = optimizer
+        if loss_fn == None:
+            loss_fn = nn.MSELoss(reduction='mean')
+        self.loss_fn = loss_fn
+        self._la_step = 0  # counter for inner optimizer
+        self.la_alpha = la_alpha
+        self._total_la_steps = la_steps
+        self.ds_loader = ds_loader
+        
+        # number
+        self.k = k
+
+        # PSO state
+        self.age = 0
+        self.steps = 0
+        self.id = k
+        self.victim = 0
+
+        self.state = [defaultdict(dict) for _ in range(k + 2)]
+        self.fitness = [-1 for _ in range(k + 2)]
+
+        # Cache the current optimizer parameters
+        for group in optimizer.param_groups:
+            for i in range(k + 1):
+                for p in group['params']:
+                    param_state = self.state[i][p]
+                    # param_state['avg'] = torch.zeros_like(p.data)
+                    # param_state['last_' + str(i)] = torch.zeros_like(p.data)
+                    # param_state['last_' + str(i)].copy_(p.data)
+                    param_state['weight'] = torch.zeros_like(p.data)
+                    param_state['weight'].copy_(p.data)
+                    param_state['age'] = 0   
+                    param_state['steps'] = 0        
+
+
+    def __getstate__(self):
+        return {
+            'state': self.state,
+            'optimizer': self.optimizer,
+            'k': self.k,
+            'la_alpha': self.la_alpha,
+            '_la_step': self._la_step,
+            '_total_la_steps': self._total_la_steps,
+        }
+
+    # def zero_grad(self):
+    #     self.optimizer.zero_grad()
+
+    # def get_la_step(self):
+    #     return self._la_step
+
+    # def state_dict(self):
+    #     return self.optimizer.state_dict()
+
+    # def load_state_dict(self, state_dict):
+    #     self.optimizer.load_state_dict(state_dict)
+
+
+    # @property
+    # def param_groups(self):
+    #     return self.optimizer.param_groups
+
+    def select_victim(self):
+        # victim = 0
+        # for i in range(self.k + 1):
+        #     if self.fitness[i] < 0:
+        #         return i
+        #     if self.fitness[i] > self.fitness[victim]:
+        #         victim = i
+        # # print(self.fitness)
+        victim = (self.steps + 1) % (self.k + 1)
+        return victim
+
+    def setloss(self, l):
+        self.victim = self.select_victim()
+        # self.store_state(victim)
+        self.fitness[self.victim] = l
+
+    def select_father(self):
+        return random.randint(0, self.k)
+
+    def _select_candicate(self):
+        # return random.randint(0, self.k)
+        return self.steps % (self.k + 1)
+    
+
+    def select_candicate(self):
+        # select an individual to grow
+        candicate = self._select_candicate()
+        self.load_state(candicate)
+
+
+    def store_state(self, k):
+        """
+        store the current position into kth buffer.
+        """
+        for group in self.optimizer.param_groups:
+            for p in group['params']:
+                param_state = self.state[k][p]
+                param_state['weight'].copy_(p.data)
+                param_state['age'] = self.age
+                param_state['steps'] = self.steps
+    
+
+    def load_state(self, k):
+        if self.id == k:
+            return
+
+        self.id = k
+        for group in self.optimizer.param_groups:
+            for p in group['params']:
+                param_state = self.state[k][p]
+                p.data.copy_(param_state['weight'])
+                self.steps = param_state['steps']
+                self.age = param_state['age']
+
+
+
+    def backup(self):
+        self.store_state(self.k + 1)
+    
+    def restore(self):
+        self.load_state(self.id)
+
+
+    def interpolate(self):
+        self.restore()
+        father = self.select_father()
+        for group in self.optimizer.param_groups:
+            for p in group['params']:
+                param_state_fa = self.state[father][p]
+                
+                # (b - a) * p + a
+                p.data.mul_(self.la_alpha).add_(param_state_fa['weight'], alpha=1.0-self.la_alpha)
+
+                # param_state_new['age'] = (self.age + param_state_fa['age']) / 2
+                # param_state_new['steps'] = 0 
+                
+                # self.fitness[victim] = (self.fitness[self.id] + self.fitness[father]) / 2
+
+
+    def step(self, closure=None):
+        """Performs a single Lookahead optimization step.
+        Arguments:
+            closure (callable, optional): A closure that reevaluates the model
+                and returns the loss.
+        """
+
+        # print(self.id)
+
+        # ======= backup the current state =======
+
+
+        # ======= SGD step =======
+        # SGD step (individual grow)
+        loss = self.optimizer.step(closure)
+        # print(f"loss: {loss}")
+        self._la_step += 1
+
+        self.age += 1
+        self.steps += 1
+
+        # for group in self.optimizer.param_groups:
+        #     for p in group['params']:
+        #         print(p.data)
+        # print(self.victim)
+        self.store_state(self.victim)
+
+
+        # ======= evolution stage =======
+        if self._la_step >= self._total_la_steps * 100:
+            self._la_step = 0
+
+            # find a victim
+            victim = self.select_victim()
+
+            # select an individual
+            father = self.select_father()
+
+            for group in self.optimizer.param_groups:
+                for p in group['params']:
+                    param_state_new = self.state[victim][p]
+                    param_state_fa = self.state[father][p]
+                    
+                    # (b - a) * p + a
+                    param_state_new['weight'].copy_(p.data.mul(self.la_alpha).add(param_state_fa['weight'], alpha=1.0-self.la_alpha))
+
+                    param_state_new['age'] = (self.age + param_state_fa['age']) / 2
+                    param_state_new['steps'] = 0 
+                    
+                    self.fitness[victim] = (self.fitness[self.id] + self.fitness[father]) / 2
+
+                    # print(self.id, father, victim)
+                    # print(f"victim: {victim}")
+                    # print(f"father: {father}")
+                    # print(f"p.data: {p.data}")
+                    # print(f"father: {param_state_fa['weight']}")
+                    # print(f"new: {param_state_new['weight']}")
+
+                    # print("using")
+                    # print(self.state)
+        
+
+        return loss
+
+
+
 
 # optimizer = # {any optimizer} e.g. torch.optim.Adam
 # if args.lookahead:
